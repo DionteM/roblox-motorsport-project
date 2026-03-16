@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+
+<anims>
+	<anim name="wing_initial">
+		<frames start="0" end="0" />
+	</anim>
+	<anim name="wing_up">
+		<frames start="0" end="10" />
+	</anim>
+	<anim name="wing_down">
+		<frames start="10" end="0" />
+	</anim>
+	<anim name="pivot_up">
+		<frames start="12" end="27" />
+	</anim>
+	<anim name="pivot_down">
+		<frames start="27" end="12" />
+	</anim>
+</anims>
