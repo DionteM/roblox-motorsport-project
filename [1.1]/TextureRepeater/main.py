@@ -84,6 +84,27 @@ def find_textures(input_dir: Path, extensions: set) -> list:
     return sorted(textures)
 
 
+def is_already_processed(
+    texture_path: Path,
+    input_dir: Path,
+    output_dir: Path | None,
+    backup: bool,
+) -> bool:
+    """
+    Check if a texture has already been processed.
+    
+    - With --output: skip if the file already exists in the output directory.
+    - With --backup: skip if a .orig backup file already exists (means it was processed before).
+    """
+    if output_dir:
+        rel_path = texture_path.relative_to(input_dir)
+        return (output_dir / rel_path).exists()
+    elif backup:
+        backup_path = texture_path.with_suffix(f".orig{texture_path.suffix}")
+        return backup_path.exists()
+    return False
+
+
 def process_texture(
     texture_path: Path,
     input_dir: Path,
@@ -208,6 +229,17 @@ def main():
     
     print(f"Found {len(textures)} texture(s)")
     
+    # Filter out already-processed textures
+    skipped = [t for t in textures if is_already_processed(t, input_dir, output_dir, args.backup)]
+    textures = [t for t in textures if not is_already_processed(t, input_dir, output_dir, args.backup)]
+    
+    if skipped:
+        print(f"Skipping {len(skipped)} already-processed texture(s)")
+    
+    if not textures:
+        print("All textures already processed. Nothing to do.")
+        sys.exit(0)
+    
     if output_dir:
         print(f"Output: {output_dir}")
     else:
@@ -219,6 +251,10 @@ def main():
     # Dry run - just list files
     if args.dry_run:
         print("=== DRY RUN - No changes will be made ===\n")
+        if skipped:
+            for tex in skipped:
+                rel = tex.relative_to(input_dir)
+                print(f"  [SKIP]           {rel}  (already processed)")
         for tex in textures:
             rel = tex.relative_to(input_dir)
             try:
@@ -227,7 +263,7 @@ def main():
                 print(f"  [WOULD PROCESS] {rel}  ({w}x{h} -> {w*2}x{h*2})")
             except Exception as e:
                 print(f"  [WOULD SKIP]    {rel}  (Error: {e})")
-        print(f"\nTotal: {len(textures)} texture(s) would be processed")
+        print(f"\nTotal: {len(textures)} texture(s) would be processed, {len(skipped)} skipped")
         return
     
     # Process textures
