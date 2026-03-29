@@ -1,26 +1,20 @@
 """
-TextureRepeater - Mirror-to-Repeat Texture Converter
-=====================================================
+TextureRepeater - V-Flip Texture Converter
+==========================================
 Converts textures that rely on Mirror tiling (used in Blender) into textures
 compatible with Repeat tiling (used in Roblox Studio).
 
-Creates a 2x2 mirrored grid from each texture:
-  ┌──────────┬──────────┐
-  │ Original │ H-Flip   │
-  ├──────────┼──────────┤
-  │ V-Flip   │ HV-Flip  │
-  └──────────┴──────────┘
-
-When this new texture is set to "Repeat" in Roblox, it produces the same
-seamless look as "Mirror" tiling in Blender.
+Applies a vertical flip to each texture so that when set to "Repeat" in
+Roblox, it produces the same seamless look as "Mirror" tiling in Blender.
 
 Usage:
-    python main.py                     # Process all PNGs in ../RR3
-    python main.py --input ../RR3      # Specify input folder
-    python main.py --backup            # Keep originals as .orig.png
-    python main.py --output ./output   # Save mirrored textures to separate folder
-    python main.py --dry-run           # Preview what would be processed
-    python main.py --extensions png,jpg,tga  # Specify file types to process
+    python TextureConverter.py                     # Process all PNGs in ../RR3
+    python TextureConverter.py --input ../RR3      # Specify input folder
+    python TextureConverter.py --backup            # Keep originals as .orig.png
+    python TextureConverter.py --output ./output   # Save flipped textures to separate folder
+    python TextureConverter.py --dry-run           # Preview what would be processed
+    python TextureConverter.py --extensions png,jpg,tga  # Specify file types to process
+    python TextureConverter.py --restore -i ../RR3 # Restore originals from .orig backups
 
 Requirements:
     pip install Pillow
@@ -42,35 +36,14 @@ except ImportError:
     sys.exit(1)
 
 
-def mirror_texture(image: Image.Image) -> Image.Image:
+def flip_texture(image: Image.Image) -> Image.Image:
     """
-    Create a 2x2 mirrored version of the input image.
+    Vertically flip the input image.
     
-    Layout:
-      Top-left:     Original
-      Top-right:    Flipped horizontally
-      Bottom-left:  Flipped vertically
-      Bottom-right: Flipped both horizontally and vertically
-    
-    This bakes the "Mirror" tiling pattern into the texture itself,
-    so that "Repeat" tiling produces identical results.
+    This converts a Mirror-tiled texture into one that tiles correctly
+    with Repeat mode in Roblox Studio.
     """
-    w, h = image.size
-
-    # Create the four quadrants
-    original = image
-    h_flip = image.transpose(Image.FLIP_LEFT_RIGHT)
-    v_flip = image.transpose(Image.FLIP_TOP_BOTTOM)
-    hv_flip = image.transpose(Image.FLIP_LEFT_RIGHT).transpose(Image.FLIP_TOP_BOTTOM)
-
-    # Assemble into 2x2 grid
-    result = Image.new(image.mode, (w * 2, h * 2))
-    result.paste(original, (0, 0))
-    result.paste(h_flip, (w, 0))
-    result.paste(v_flip, (0, h))
-    result.paste(hv_flip, (w, h))
-
-    return result
+    return image.transpose(Image.FLIP_TOP_BOTTOM)
 
 
 def find_textures(input_dir: Path, extensions: set) -> list:
@@ -123,8 +96,8 @@ def process_texture(
         img = Image.open(texture_path)
         original_size = img.size
         
-        # Create mirrored version
-        mirrored = mirror_texture(img)
+        # Create flipped version
+        flipped = flip_texture(img)
         
         # Determine output path
         if output_dir:
@@ -146,14 +119,80 @@ def process_texture(
         elif texture_path.suffix.lower() == ".png":
             save_kwargs["compress_level"] = 6
         
-        mirrored.save(out_path, **save_kwargs)
+        flipped.save(out_path, **save_kwargs)
         
-        new_size = mirrored.size
-        msg = f"{original_size[0]}x{original_size[1]} -> {new_size[0]}x{new_size[1]}"
+        msg = f"{original_size[0]}x{original_size[1]} flipped"
         return (str(rel_path), True, msg)
         
     except Exception as e:
         return (str(rel_path), False, str(e))
+
+
+def find_backup_files(input_dir: Path) -> list:
+    """Recursively find all .orig.* backup files in the given directory."""
+    backups = []
+    for root, dirs, files in os.walk(input_dir):
+        for filename in files:
+            # Match pattern like "texture.orig.png"
+            parts = filename.rsplit(".", 2)
+            if len(parts) >= 3 and parts[-2] == "orig":
+                backups.append(Path(root) / filename)
+    return sorted(backups)
+
+
+def restore_backups(input_dir: Path, dry_run: bool) -> None:
+    """
+    Restore original files from .orig backups.
+    
+    Finds all .orig.* files, removes the processed version, and renames
+    the backup back to the original filename.
+    """
+    print(f"Scanning for backups: {input_dir}")
+    backups = find_backup_files(input_dir)
+    
+    if not backups:
+        print("No .orig backup files found. Nothing to restore.")
+        return
+    
+    print(f"Found {len(backups)} backup(s) to restore")
+    print()
+    
+    if dry_run:
+        print("=== DRY RUN - No changes will be made ===\n")
+        for backup_path in backups:
+            # Derive the original name: remove .orig from the suffix chain
+            original_name = backup_path.name.replace(".orig.", ".", 1)
+            original_path = backup_path.parent / original_name
+            rel = backup_path.relative_to(input_dir)
+            print(f"  [WOULD RESTORE] {rel} -> {original_name}")
+        print(f"\nTotal: {len(backups)} file(s) would be restored")
+        return
+    
+    restored = 0
+    failed = 0
+    for backup_path in backups:
+        original_name = backup_path.name.replace(".orig.", ".", 1)
+        original_path = backup_path.parent / original_name
+        rel = backup_path.relative_to(input_dir)
+        try:
+            # Remove the processed file if it exists
+            if original_path.exists():
+                original_path.unlink()
+            # Rename backup to original
+            backup_path.rename(original_path)
+            restored += 1
+            print(f"  [RESTORED] {rel} -> {original_name}")
+        except Exception as e:
+            failed += 1
+            print(f"  [FAIL]     {rel}  ({e})")
+    
+    print(f"\n{'='*60}")
+    print(f"  Restored: {restored}")
+    print(f"  Failed:   {failed}")
+    print(f"  Total:    {len(backups)}")
+    
+    if failed > 0:
+        sys.exit(1)
 
 
 def main():
@@ -172,12 +211,17 @@ def main():
         "--output", "-o",
         type=str,
         default=None,
-        help="Output directory for mirrored textures (default: overwrite in-place)"
+        help="Output directory for flipped textures (default: overwrite in-place)"
     )
     parser.add_argument(
         "--backup", "-b",
         action="store_true",
         help="Keep original files as .orig.png before overwriting"
+    )
+    parser.add_argument(
+        "--restore", "-r",
+        action="store_true",
+        help="Restore original files from .orig backups (requires --input)"
     )
     parser.add_argument(
         "--dry-run", "-n",
@@ -209,6 +253,14 @@ def main():
     if not input_dir.exists():
         print(f"ERROR: Input directory not found: {input_dir}")
         sys.exit(1)
+    
+    # Handle --restore mode
+    if args.restore:
+        if not args.input:
+            print("ERROR: --restore requires --input to specify the directory to restore")
+            sys.exit(1)
+        restore_backups(input_dir, args.dry_run)
+        return
     
     # Resolve output directory
     output_dir = Path(args.output).resolve() if args.output else None
@@ -260,7 +312,7 @@ def main():
             try:
                 img = Image.open(tex)
                 w, h = img.size
-                print(f"  [WOULD PROCESS] {rel}  ({w}x{h} -> {w*2}x{h*2})")
+                print(f"  [WOULD PROCESS] {rel}  ({w}x{h} -> v-flip)")
             except Exception as e:
                 print(f"  [WOULD SKIP]    {rel}  (Error: {e})")
         print(f"\nTotal: {len(textures)} texture(s) would be processed, {len(skipped)} skipped")
